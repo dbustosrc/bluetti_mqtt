@@ -1,0 +1,28 @@
+configuration:
+  mqtt_username:
+    name: MQTT username
+    description: Username for the MQTT broker when you set the host manually.
+  mqtt_password:
+    name: MQTT password
+    description: Password for the MQTT broker when you set the host manually.
+  mqtt_host:
+    name: MQTT host
+    description: Broker hostname or IP address. Leave blank to use the MQTT service provided by Supervisor.
+  mqtt_port:
+    name: MQTT port
+    description: Optional broker port override. Defaults to 1883 for a manually configured broker.
+  ha_config:
+    name: HA Config Level
+    description: Choose the entities created by MQTT discovery. Normal is the default, advanced includes internal measurements, and none disables discovery.
+  bt_mac:
+    name: Address(es)
+    description: Bluetooth MAC addresses of the Bluetti stations. Separate multiple addresses with one space.
+  poll_sec:
+    name: Poll Interval
+    description: Time between polling cycles in seconds.
+  scan:
+    name: Scan
+    description: Run a one-time scan for nearby devices. Check the Log tab for results.
+  debug:
+    name: Debug Mode
+    description: Include detailed diagnostic messages in the Log tab.

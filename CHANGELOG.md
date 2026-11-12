@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.16.4
+
+* Documentation update for Home Assistant, including the Info page, logo, and configuration help.
+
 ## 0.16.3
 
 * Provide the Bluetti to MQTT app for Home Assistant on AMD64 and ARM64, with support for the models listed in the README.

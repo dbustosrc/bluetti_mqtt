@@ -1,5 +1,5 @@
 name: Bluetti to MQTT
-version: "0.16.3"
+version: "0.16.4"
 slug: bluetti_ac60_mqtt
 description: Bluetooth to MQTT bridge for Bluetti power stations.
 url: https://github.com/dbustosrc/bluetti_mqtt
@@ -12,22 +12,22 @@ host_dbus: true
 services:
   - mqtt:want
 options:
-  bt_mac: ""
-  mqtt_host: ""
-  mqtt_port: ""
   mqtt_username: ""
   mqtt_password: ""
-  poll_sec: 15
+  mqtt_host: ""
+  mqtt_port: ""
   ha_config: normal
+  bt_mac: ""
+  poll_sec: 15
   scan: false
   debug: false
 schema:
-  bt_mac: "match(^$|^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}( ([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})*$)"
-  mqtt_host: str?
-  mqtt_port: str?
   mqtt_username: str?
   mqtt_password: password?
+  mqtt_host: str?
+  mqtt_port: str?
+  ha_config: list(normal|none|advanced)
+  bt_mac: "match(^$|^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}( ([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2})*$)"
   poll_sec: int(1,3600)
-  ha_config: list(normal|advanced|none)
   scan: bool
   debug: bool

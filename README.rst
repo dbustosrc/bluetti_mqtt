@@ -207,7 +207,7 @@ Credits
   `semitop7/bluetti2mqtt <https://github.com/semitop7/bluetti2mqtt>`_, and
   `DuBistMutig/bluetti2mqtt <https://github.com/DuBistMutig/bluetti2mqtt>`_
   for Home Assistant add-on packaging and compatibility references.
-- The Home Assistant app icon comes from ftrueck/bluetti2mqtt and is licensed
+- The Home Assistant app icon and logo come from ftrueck/bluetti2mqtt and are licensed
   under Apache-2.0. See `LICENSE-icon <LICENSE-icon>`_.
 - `Ellmondo/bluetti-bt-connect-lib <https://github.com/Ellmondo/bluetti-bt-connect-lib>`_
   for documenting an expansion-pack current register on the EP2000.
