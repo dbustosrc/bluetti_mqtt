@@ -16,11 +16,11 @@ class MultiDeviceManager:
     async def run(self):
         logging.info(f'Connecting to clients: {self.addresses}')
 
-        # Perform a blocking scan just to speed up initial connect
-        await BleakScanner.discover()
+        # Reuse discovered devices so Bleak does not scan again when connecting.
+        devices = {d.address.lower(): d for d in await BleakScanner.discover()}
 
         # Start client loops
-        self.clients = {a: BluetoothClient(a) for a in self.addresses}
+        self.clients = {a: BluetoothClient(devices.get(a.lower(), a)) for a in self.addresses}
         await asyncio.gather(*[c.run() for c in self.clients.values()])
 
     def is_ready(self, address: str):

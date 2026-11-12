@@ -13,7 +13,9 @@ jobs:
       - name: Check app startup options
         run: bash tests/test_app_startup.sh
       - name: Build app and check installed dependencies
-        run: docker build .
+        run: docker build -t bluetti-app:test .
+      - name: Check BlueZ tools and S6 lifecycle
+        run: bash tests/test_container.sh bluetti-app:test
 
   deploy:
     runs-on: ubuntu-24.04

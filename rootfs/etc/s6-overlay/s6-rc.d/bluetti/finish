@@ -1,0 +1,8 @@
+#!/bin/sh
+code=$1
+if [ "$code" -eq 256 ]; then
+    code=$((128 + $2))
+    [ "$2" -eq 15 ] && code=0
+fi
+printf '%s\n' "$code" > /run/s6-linux-init-container-results/exitcode
+exec /run/s6/basedir/bin/halt

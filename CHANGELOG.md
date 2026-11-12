@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.16.6
+
+* Include BlueZ tools and run the Home Assistant bridge as an S6 service.
+* Reuse scanned Bluetooth devices when connecting to avoid redundant discovery.
+
 ## 0.16.5
 
 * Add AC60 battery flow status and charging and discharging power calculated from battery voltage and current.

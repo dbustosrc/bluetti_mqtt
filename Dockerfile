@@ -3,11 +3,16 @@ FROM ghcr.io/home-assistant/base-python:3.14-alpine3.24
 WORKDIR /usr/src/bluetti
 COPY pyproject.toml setup.py setup.cfg requirements.txt README.rst LICENSE ./
 COPY bluetti_mqtt/ bluetti_mqtt/
-RUN apk add --no-cache --virtual .build-deps build-base linux-headers \
+RUN apk add --no-cache bluez \
+    && apk add --no-cache --virtual .build-deps build-base linux-headers \
     && python -m pip install --no-cache-dir . \
     && apk del .build-deps \
+    && bluetoothctl --version \
     && python -m pip check \
     && bluetti-mqtt --help
 
 COPY --chmod=755 run.sh /run.sh
-CMD ["/run.sh"]
+COPY rootfs/ /
+RUN chmod 755 /etc/s6-overlay/s6-rc.d/bluetti/run \
+    /etc/s6-overlay/s6-rc.d/bluetti/finish
+CMD []
