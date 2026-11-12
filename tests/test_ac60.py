@@ -97,6 +97,55 @@ class AC60Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('homeassistant/sensor/456_dc_input_power2/config', messages)
         self.assertNotIn('homeassistant/sensor/456_ac_input_voltage/config', messages)
 
+    async def test_battery_power_uses_same_sample_voltage_and_status(self):
+        await self.mqtt._init_device(self.device, self.broker)
+        messages = self.messages()
+        status_config = json.loads(messages['homeassistant/sensor/123_battery_status/config'])
+        self.assertEqual(status_config['options'], ['idle', 'charging', 'discharging'])
+        for name in ('battery_charging_power', 'battery_discharging_power'):
+            config = json.loads(messages[f'homeassistant/sensor/123_{name}/config'])
+            self.assertEqual(config['unit_of_measurement'], 'W')
+            self.assertEqual(config['device_class'], 'power')
+            self.assertEqual(config['state_class'], 'measurement')
+            self.assertTrue(config['force_update'])
+            self.assertEqual(config['expire_after'], 45)
+            self.assertFalse(self.device.has_field_setter(name))
+
+        # Samples cover solar surplus, night discharge, idle and signed current.
+        for voltage, current, status, charging, discharging in (
+            (2331, 62, 1, Decimal('144.522'), Decimal(0)),
+            (2282, 42, 2, Decimal(0), Decimal('95.844')),
+            (2318, 4, 0, Decimal(0), Decimal(0)),
+            (2282, -12, 2, Decimal(0), Decimal('27.384')),
+        ):
+            with self.subTest(status=status, current=current):
+                self.broker.reset_mock()
+                parsed = self.device.parse(100, registers(100, 50, {
+                    100: voltage, 101: current, 102: 32, 103: status,
+                }))
+                self.assertEqual(parsed['battery_charging_power'], charging)
+                self.assertEqual(parsed['battery_discharging_power'], discharging)
+                await self.mqtt._handle_message(self.broker, ParserMessage(self.device, parsed))
+                published = self.messages()
+                prefix = 'bluetti/state/AC60-123/'
+                self.assertEqual(published[prefix + 'battery_status'], str(status).encode())
+                self.assertEqual(Decimal(published[prefix + 'battery_charging_power'].decode()), charging)
+                self.assertEqual(Decimal(published[prefix + 'battery_discharging_power'].decode()), discharging)
+
+    def test_invalid_or_partial_battery_sample_keeps_other_telemetry(self):
+        for voltage, status in ((0, 1), (65535, 2), (2331, 65535)):
+            with self.subTest(voltage=voltage, status=status):
+                parsed = self.device.parse(100, registers(100, 50, {
+                    100: voltage, 101: 62, 102: 32, 103: status,
+                }))
+                self.assertEqual(parsed['total_battery_percent'], 32)
+                self.assertNotIn('battery_charging_power', parsed)
+                self.assertNotIn('battery_discharging_power', parsed)
+        self.assertNotIn('battery_charging_power', self.device.parse(
+            101, registers(101, 3, {101: 62, 102: 32, 103: 1})
+        ))
+        self.assertNotIn('battery_status', self.device.parse(100, bytes(6)))
+
     async def test_known_pack_reports_on_existing_topic(self):
         sample = registers(6100, 100, {6111: 2365, 6113: 74})
         parsed = self.device.parse(6100, sample)

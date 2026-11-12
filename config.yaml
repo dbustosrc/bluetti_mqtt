@@ -1,5 +1,5 @@
 name: Bluetti to MQTT
-version: "0.16.4"
+version: "0.16.5"
 slug: bluetti_ac60_mqtt
 description: Bluetooth to MQTT bridge for Bluetti power stations.
 url: https://github.com/dbustosrc/bluetti_mqtt

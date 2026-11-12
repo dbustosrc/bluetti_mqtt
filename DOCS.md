@@ -24,4 +24,8 @@
 
 The AC60 exposes three DC inputs, battery state of charge, AC measurements, and supported controls. Use either the station's total solar energy or the individual channel counters in the Energy dashboard to avoid counting the same production twice. For battery energy, Home Assistant requires separate energy measurements for charging and discharging.
 
+Battery Charging Power and Battery Discharging Power are calculated from the battery voltage and current in the same Bluetooth sample. The battery status supplies the flow direction. Battery Status reports `idle`, `charging`, or `discharging`.
+
+The [battery energy package](https://github.com/dbustosrc/bluetti_mqtt/blob/main/examples/home_assistant/ac60_battery_energy.yaml) integrates those power sensors into separate kWh totals using Home Assistant's Integral integration, which restores its totals after restarts. Adjust the source entity IDs if Home Assistant assigned different names. In the Energy dashboard battery settings, select **AC60 Battery Charging Energy** for energy going into the battery, **AC60 Battery Discharging Energy** for energy coming out, and the station's **Total Battery Percent** for state of charge. Accumulation starts when the energy sensors are created.
+
 The [project README](https://github.com/dbustosrc/bluetti_mqtt/blob/main/README.rst) covers the CLI tools, including `bluetti-discovery` and `bluetti-logger`, and links to the source and license.

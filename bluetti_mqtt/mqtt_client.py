@@ -518,6 +518,14 @@ AC60_FIELDS = {
         for name in ('ac_input_voltage', 'ac_input_frequency', 'total_battery_voltage')
     },
     'battery_current': measurement('Battery Current', 'A', 'current'),
+    'battery_status': MqttFieldConfig(MqttFieldType.NUMERIC, False, False, {
+        'name': 'Battery Status',
+        'device_class': 'enum',
+        'options': ['idle', 'charging', 'discharging'],
+        'value_template': '{{ ["idle", "charging", "discharging"][value | int] }}',
+    }),
+    'battery_charging_power': measurement('Battery Charging Power', 'W', 'power', force_update=True),
+    'battery_discharging_power': measurement('Battery Discharging Power', 'W', 'power', force_update=True),
     'num_packs_connected': measurement('Connected Battery Packs'),
     'ac_output_voltage': measurement('AC Output Voltage', 'V', 'voltage'),
     'ac_output_amps': measurement('AC Output Current', 'A', 'current'),

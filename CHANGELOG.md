@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.16.5
+
+* Add AC60 battery flow status and charging and discharging power calculated from battery voltage and current.
+* Provide a Home Assistant package for separate battery energy totals in the Energy dashboard.
+
 ## 0.16.4
 
 * Documentation update for Home Assistant, including the Info page, logo, and configuration help.

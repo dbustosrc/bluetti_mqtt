@@ -1,3 +1,4 @@
+from decimal import Decimal
 from enum import Enum, unique
 from typing import List
 from ..commands import ReadHoldingRegisters
@@ -30,6 +31,7 @@ class AC60(BluettiDevice):
         # Core (100)
         self.struct.add_decimal_field('battery_current', 101, 1, signed=True)
         self.struct.add_uint_field('total_battery_percent', 102, (0, 100))
+        self.struct.add_uint_field('battery_status', 103, (0, 2))
         self.struct.add_uint_field('estimated_time_min', 104)
         self.struct.add_swap_string_field('device_type', 110, 6)
         self.struct.add_sn_field('serial_number', 116)
@@ -102,10 +104,21 @@ class AC60(BluettiDevice):
 
     def parse(self, address: int, data: bytes) -> dict:
         parsed = super().parse(address, data)
+        if address == 100 and 'battery_status' in parsed:
+            # Use voltage, current and direction from the same home-page sample.
+            voltage = Decimal(int.from_bytes(data[:2], 'big')) / 100
+            if 10 <= voltage <= 40:
+                power = voltage * abs(parsed['battery_current'])
+                status = parsed['battery_status']
+                parsed['battery_charging_power'] = power if status == 1 else Decimal(0)
+                parsed['battery_discharging_power'] = power if status == 2 else Decimal(0)
         if 'pack_voltage' in parsed and 'pack_battery_percent' in parsed:
             # shortcut: only the 6100 pack is mapped, add other slots after validating their registers.
             parsed['pack_num'] = 1
         return parsed
+
+    def has_field(self, field: str):
+        return field in ('battery_charging_power', 'battery_discharging_power') or super().has_field(field)
 
     @property
     def polling_commands(self) -> List[ReadHoldingRegisters]:

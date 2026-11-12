@@ -1,0 +1,17 @@
+sensor:
+  - platform: integration
+    name: AC60 Battery Charging Energy
+    unique_id: ac60_battery_charging_energy
+    source: sensor.ac60_battery_charging_power
+    unit_prefix: k
+    unit_time: h
+    method: left
+    round: 4
+  - platform: integration
+    name: AC60 Battery Discharging Energy
+    unique_id: ac60_battery_discharging_energy
+    source: sensor.ac60_battery_discharging_power
+    unit_prefix: k
+    unit_time: h
+    method: left
+    round: 4
