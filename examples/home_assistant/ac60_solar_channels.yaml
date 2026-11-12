@@ -1,0 +1,25 @@
+sensor:
+  - platform: integration
+    name: AC60 Solar Input 1 Energy
+    unique_id: ac60_solar_input_1_energy
+    source: sensor.ac60_dc_input_power1
+    unit_prefix: k
+    unit_time: h
+    method: trapezoidal
+    round: 4
+  - platform: integration
+    name: AC60 Solar Input 2 Energy
+    unique_id: ac60_solar_input_2_energy
+    source: sensor.ac60_dc_input_power2
+    unit_prefix: k
+    unit_time: h
+    method: trapezoidal
+    round: 4
+  - platform: integration
+    name: AC60 Solar Input 3 Energy
+    unique_id: ac60_solar_input_3_energy
+    source: sensor.ac60_dc_input_power3
+    unit_prefix: k
+    unit_time: h
+    method: trapezoidal
+    round: 4

@@ -20,11 +20,16 @@ class ChargingMode(Enum):
 
 
 class AC60(BluettiDevice):
+    @staticmethod
+    def telemetry_timeout(poll_interval: int) -> int:
+        return max(30, 3 * poll_interval)
+
     def __init__(self, address: str, sn: str):
         self.struct = DeviceStruct()
 
         # Core (100)
-        self.struct.add_uint_field('total_battery_percent', 102)
+        self.struct.add_decimal_field('battery_current', 101, 1, signed=True)
+        self.struct.add_uint_field('total_battery_percent', 102, (0, 100))
         self.struct.add_uint_field('estimated_time_min', 104)
         self.struct.add_swap_string_field('device_type', 110, 6)
         self.struct.add_sn_field('serial_number', 116)
@@ -45,9 +50,13 @@ class AC60(BluettiDevice):
         self.struct.add_uint_field('pack_dc_input_power', 1220)
         self.struct.add_decimal_field('pack_dc_input_voltage', 1221, 1)
         self.struct.add_decimal_field('pack_dc_input_current', 1222, 1)
+        self.struct.add_bool_field('charging_from_pack2_dc', 1226)
+        self.struct.add_uint_field('pack2_dc_input_power', 1228)
+        self.struct.add_decimal_field('pack2_dc_input_voltage', 1229, 1)
+        self.struct.add_decimal_field('pack2_dc_input_current', 1230, 1)
         self.struct.add_decimal_field('ac_input_frequency', 1300, 1)
         self.struct.add_uint_field('internal_ac_input_power', 1313)
-        self.struct.add_decimal_field('ac_input_voltage', 1314, 1)
+        self.struct.add_uint_field('ac_input_voltage', 1314)
         self.struct.add_decimal_field('ac_input_current', 1315, 1)
 
         # Output Details (1400 - 1500)
@@ -55,11 +64,8 @@ class AC60(BluettiDevice):
         self.struct.add_uint_field('dc_usb_output_power', 1404)
         self.struct.add_uint_field('dc_12v_output_power', 1406)
         self.struct.add_uint_field('dc_output_uptime_minutes', 1410)
-        self.struct.add_uint_field('ac_output_power', 1420)
         self.struct.add_uint_field('ac_output_uptime_minutes', 1424)
-        self.struct.add_uint_field('ac_output_power', 1430)
         self.struct.add_decimal_field('ac_output_frequency', 1500, 1)
-        self.struct.add_bool_field('ac_output_on', 1509)
         self.struct.add_uint_field('battery_inputoutput_power', 1510)
         self.struct.add_decimal_field('ac_output_voltage', 1511, 1)
         self.struct.add_decimal_field('ac_output_amps', 1512, 1)
@@ -86,13 +92,20 @@ class AC60(BluettiDevice):
         # Battery Data Register (6100)
         self.struct.add_swap_string_field('battery_type', 6101, 6)
         self.struct.add_sn_field('pack_serial_number', 6107)
-        self.struct.add_decimal_field('pack_voltage', 6111, 2)
-        self.struct.add_uint_field('pack_battery_percent', 6113)
+        self.struct.add_decimal_field('pack_voltage', 6111, 2, (10, 40))
+        self.struct.add_uint_field('pack_battery_percent', 6113, (0, 100))
         self.struct.add_version_field('bcu_version', 6175)
 
         # Battery Data Register (6300)
 
         super().__init__(address, 'AC60', sn)
+
+    def parse(self, address: int, data: bytes) -> dict:
+        parsed = super().parse(address, data)
+        if 'pack_voltage' in parsed and 'pack_battery_percent' in parsed:
+            # shortcut: only the 6100 pack is mapped, add other slots after validating their registers.
+            parsed['pack_num'] = 1
+        return parsed
 
     @property
     def polling_commands(self) -> List[ReadHoldingRegisters]:
@@ -112,20 +125,9 @@ class AC60(BluettiDevice):
 
     @property
     def logging_commands(self) -> List[ReadHoldingRegisters]:
-        return [
-            ReadHoldingRegisters(100, 50),
-            ReadHoldingRegisters(1100, 51),
-            ReadHoldingRegisters(1200, 90),
-            ReadHoldingRegisters(1300, 31),
-            ReadHoldingRegisters(1400, 48),
-            ReadHoldingRegisters(1500, 30),
-            ReadHoldingRegisters(2000, 67),
-            ReadHoldingRegisters(2200, 29),
-            ReadHoldingRegisters(6000, 31),
-            ReadHoldingRegisters(6100, 100),
-            ReadHoldingRegisters(6300, 52),
-        ]
-    
+        return self.polling_commands
+
     @property
     def writable_ranges(self) -> List[range]:
-        return [range(2000, 2225)]
+        return [range(2007, 2008), range(2011, 2013), range(2014, 2015),
+                range(2017, 2018), range(2020, 2022), range(2225, 2226)]

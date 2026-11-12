@@ -41,6 +41,7 @@ class CommandLineHandler:
         parser.add_argument(
             '--password',
             type=str,
+            default=os.environ.get('BLUETTI_MQTT_PASSWORD') or None,
             help='The optional MQTT broker password')
         parser.add_argument(
             '--interval',
@@ -63,7 +64,7 @@ class CommandLineHandler:
         if sys.platform == 'win32':
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-        args = parser.parse_args()
+        args = parser.parse_args(self.argv[1:])
         if args.scan:
             asyncio.run(scan_devices())
         elif args.hostname and len(args.addresses) > 0:
@@ -72,7 +73,8 @@ class CommandLineHandler:
             parser.print_help()
 
     def start(self, args: argparse.Namespace):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
         # Register signal handlers for safe shutdown
         if sys.platform != 'win32':
@@ -88,6 +90,7 @@ class CommandLineHandler:
             loop.run_forever()
         finally:
             loop.close()
+            asyncio.set_event_loop(None)
             logging.debug("Shut down completed")
 
     async def run(self, args: argparse.Namespace):
@@ -110,6 +113,7 @@ class CommandLineHandler:
             port=args.port,
             username=args.username,
             password=args.password,
+            poll_interval=args.interval,
         )
         mqtt_task = loop.create_task(mqtt_client.run())
         self.background_tasks.add(mqtt_task)

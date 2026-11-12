@@ -3,8 +3,20 @@ name: Build distribution
 on: [push, pull_request]
 
 jobs:
+  app:
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check app startup options
+        run: bash tests/test_app_startup.sh
+      - name: Build app and check installed dependencies
+        run: docker build .
+
   deploy:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout

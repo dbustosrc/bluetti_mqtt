@@ -1,6 +1,15 @@
 # Change Log
 
-## FUTURE
+## 0.16.3
+
+* Provide the Bluetti to MQTT app for Home Assistant on AMD64 and ARM64, with support for the models listed in the README.
+* Publish individual AC60 DC inputs and the voltage and state of charge from the mapped battery pack.
+* Expose AC60 battery current, AC measurements, output runtime, and ECO settings.
+* Correct AC60 input voltage scaling and use one register each for AC output power and switch state.
+* Enable AC60 Grid Enhancement control and verify AC60 control writes by reading back the register.
+* Expire stale AC60 measurements and preserve MQTT discovery identities across upgrades.
+* Resolve compatible dependency versions at install time and support CLI startup on Python 3.14.
+* Provide an optional Home Assistant package for per-input AC60 solar energy.
 
 ## 0.15.0
 

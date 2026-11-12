@@ -6,7 +6,6 @@ from .struct import DeviceStruct
 
 
 @unique
-
 class ChargingMode(Enum):
     STANDARD = 0
     SILENT = 1
@@ -19,7 +18,7 @@ class AC70(BluettiDevice):
 
         # Core (100)
         self.struct.add_uint_field('total_battery_percent', 102)
-        self.struct.add_decimal_field('estimated_time_hr', 104,1)
+        self.struct.add_decimal_field('estimated_time_hr', 104, 1)
         self.struct.add_swap_string_field('device_type', 110, 6)
         self.struct.add_sn_field('serial_number', 116)
         self.struct.add_uint_field('dc_output_power', 140)
@@ -116,7 +115,7 @@ class AC70(BluettiDevice):
             ReadHoldingRegisters(6100, 100),
             ReadHoldingRegisters(6300, 52),
         ]
-    
+
     @property
     def writable_ranges(self) -> List[range]:
         return [range(2000, 2225)]

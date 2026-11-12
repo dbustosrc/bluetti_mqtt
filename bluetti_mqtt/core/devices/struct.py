@@ -59,13 +59,14 @@ class EnumField(DeviceField):
 
 
 class DecimalField(DeviceField):
-    def __init__(self, name: str, address: int, scale: int, range: Optional[Tuple[int, int]]):
+    def __init__(self, name: str, address: int, scale: int, range: Optional[Tuple[int, int]], signed=False):
         self.scale = scale
         self.range = range
+        self.signed = signed
         super().__init__(name, address, 1)
 
     def parse(self, data: bytes) -> Decimal:
-        val = Decimal(struct.unpack('!H', data)[0])
+        val = Decimal(int.from_bytes(data, 'big', signed=self.signed))
         return val / 10 ** self.scale
 
     def in_range(self, val: Decimal) -> bool:
@@ -130,8 +131,8 @@ class DeviceStruct:
     def add_enum_field(self, name: str, address: int, enum: Type[Enum]):
         self.fields.append(EnumField(name, address, enum))
 
-    def add_decimal_field(self, name: str, address: int, scale: int, range: Tuple[int, int] = None):
-        self.fields.append(DecimalField(name, address, scale, range))
+    def add_decimal_field(self, name: str, address: int, scale: int, range: Tuple[int, int] = None, *, signed=False):
+        self.fields.append(DecimalField(name, address, scale, range, signed))
 
     def add_decimal_array_field(self, name: str, address: int, size: int, scale: int):
         self.fields.append(DecimalArrayField(name, address, size, scale))

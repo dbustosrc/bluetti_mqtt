@@ -1,5 +1,6 @@
 import asyncio
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, replace
 from enum import auto, Enum, unique
 import json
 import logging
@@ -8,7 +9,7 @@ from typing import List, Optional
 from aiomqtt import Client, MqttError, Will
 from paho.mqtt.client import MQTTMessage
 from bluetti_mqtt.bus import AvailabilityMessage, CommandMessage, EventBus, ParserMessage
-from bluetti_mqtt.core import BluettiDevice, DeviceCommand
+from bluetti_mqtt.core import AC60, BluettiDevice
 
 
 @unique
@@ -148,18 +149,6 @@ NORMAL_DEVICE_FIELDS = {
         advanced=True,
         home_assistant_extra={
             'name': 'AC Output Mode',
-        }
-    ),
-    'ac_input_voltage': MqttFieldConfig(
-        type=MqttFieldType.NUMERIC,
-        setter=False,
-        advanced=False,
-        home_assistant_extra={
-            'name': 'AC Input Voltage',
-            'unit_of_measurement': 'V',
-            'device_class': 'voltage',
-            'state_class': 'measurement',
-            'force_update': True,
         }
     ),
     'ac_input_current': MqttFieldConfig(
@@ -498,43 +487,53 @@ NORMAL_DEVICE_FIELDS = {
         }
     ),
 }
+
+
+def measurement(name, unit=None, device_class=None, *, force_update=False):
+    config = {'name': name, 'state_class': 'measurement'}
+    if unit:
+        config['unit_of_measurement'] = unit
+    if device_class:
+        config['device_class'] = device_class
+    if force_update:
+        config['force_update'] = True
+    return MqttFieldConfig(MqttFieldType.NUMERIC, False, False, config)
+
+
 DC_INPUT_FIELDS = {
-    'dc_input_voltage1': MqttFieldConfig(
-        type=MqttFieldType.NUMERIC,
-        setter=False,
-        advanced=False,
-        home_assistant_extra={
-            'name': 'DC Input Voltage 1',
-            'unit_of_measurement': 'V',
-            'device_class': 'voltage',
-            'state_class': 'measurement',
-            'force_update': True,
-        }
-    ),
-    'dc_input_power1': MqttFieldConfig(
-        type=MqttFieldType.NUMERIC,
-        setter=False,
-        advanced=False,
-        home_assistant_extra={
-            'name': 'DC Input Power 1',
-            'unit_of_measurement': 'W',
-            'device_class': 'power',
-            'state_class': 'measurement',
-            'force_update': True,
-        }
-    ),
-    'dc_input_current1': MqttFieldConfig(
-        type=MqttFieldType.NUMERIC,
-        setter=False,
-        advanced=False,
-        home_assistant_extra={
-            'name': 'DC Input Current 1',
-            'unit_of_measurement': 'A',
-            'device_class': 'current',
-            'state_class': 'measurement',
-            'force_update': True,
-        }
-    ),
+    f'{source}_{metric}': replace(
+        measurement(f'DC Input {metric.title()} {channel}', unit, metric, force_update=True),
+        id_override=f'dc_input_{metric}{channel}',
+    )
+    for channel, source in enumerate(('internal_dc_input', 'pack_dc_input', 'pack2_dc_input'), 1)
+    for metric, unit in (('voltage', 'V'), ('power', 'W'), ('current', 'A'))
+}
+LEGACY_DC_INPUT_FIELDS = {
+    name: field for name, field in DC_INPUT_FIELDS.items() if name.startswith('internal_dc_input_')
+}
+AC60_FIELDS = {
+    **NORMAL_DEVICE_FIELDS,
+    **{
+        name: replace(NORMAL_DEVICE_FIELDS[name], advanced=False)
+        for name in ('ac_input_voltage', 'ac_input_frequency', 'total_battery_voltage')
+    },
+    'battery_current': measurement('Battery Current', 'A', 'current'),
+    'num_packs_connected': measurement('Connected Battery Packs'),
+    'ac_output_voltage': measurement('AC Output Voltage', 'V', 'voltage'),
+    'ac_output_amps': measurement('AC Output Current', 'A', 'current'),
+    'ac_output_frequency': measurement('AC Output Frequency', 'Hz', 'frequency'),
+    'ac_output_uptime_minutes': measurement('AC Output Uptime', 'min', 'duration'),
+    'dc_output_uptime_minutes': measurement('DC Output Uptime', 'min', 'duration'),
+    'ac_eco_hours': measurement('AC ECO Timeout', 'h', 'duration'),
+    'dc_eco_hours': measurement('DC ECO Timeout', 'h', 'duration'),
+    'ac_eco_watts': measurement('AC ECO Threshold', 'W', 'power'),
+    'dc_eco_watts': measurement('DC ECO Threshold', 'W', 'power'),
+    **{
+        field: MqttFieldConfig(MqttFieldType.BOOL, False, False, {'name': f'DC Input {channel} Active'})
+        for channel, field in enumerate(
+            ('charging_from_internal_dc', 'charging_from_pack_dc', 'charging_from_pack2_dc'), 1
+        )
+    },
 }
 
 
@@ -582,7 +581,7 @@ def battery_pack_fields(pack: int):
 
 class MQTTClient:
     devices: List[BluettiDevice]
-    message_queue: asyncio.Queue
+    message_queue: Optional[asyncio.Queue]
 
     def __init__(
         self,
@@ -592,6 +591,7 @@ class MQTTClient:
         port: int = 1883,
         username: Optional[str] = None,
         password: Optional[str] = None,
+        poll_interval: int = 0,
     ):
         self.bus = bus
         self.hostname = hostname
@@ -599,15 +599,18 @@ class MQTTClient:
         self.username = username
         self.password = password
         self.home_assistant_mode = home_assistant_mode
+        self.sensor_expiry = AC60.telemetry_timeout(poll_interval)
         self.devices = []
-        self.device_availability = {}  # Track device connectivity status
+        self.message_queue = None
+        self.device_availability = {}
 
     async def run(self):
+        self.bus.add_parser_listener(self.handle_message)
+        self.bus.add_availability_listener(self.handle_availability)
         while True:
             logging.info('Connecting to MQTT broker...')
             try:
                 async with Client(
-#                    mqtt.CallbackAPIVersion.VERSION1,
                     hostname=self.hostname,
                     port=self.port,
                     username=self.username,
@@ -621,89 +624,59 @@ class MQTTClient:
                 ) as client:
                     logging.info('Connected to MQTT broker')
 
-                    # Publish online status
                     await self._publish_availability(client, True)
-                    
-                    # Republish all device availability on reconnect
-                    for sn, available in self.device_availability.items():
-                        device = next((d for d in self.devices if d.sn == sn), None)
-                        if device:
-                            await self._publish_device_availability(client, device, available)
-                            logging.info(f'Republished device {device.type}-{device.sn} availability on reconnect: {"online" if available else "offline"}')
+                    await self._publish_known_availability(client)
 
-                    # Connect to event bus
                     self.message_queue = asyncio.Queue()
-                    self.bus.add_parser_listener(self.handle_message)
-                    self.bus.add_availability_listener(self.handle_availability)
-
+                    tasks = [
+                        asyncio.create_task(self._handle_commands(client)),
+                        asyncio.create_task(self._handle_messages(client)),
+                        asyncio.create_task(self._periodic_availability_refresh(client)),
+                    ]
                     try:
-                        # Handle pub/sub
-                        await asyncio.gather(
-                            self._handle_commands(client),
-                            self._handle_messages(client),
-                            self._periodic_availability_refresh(client)
-                        )
+                        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                        for task in done:
+                            task.result()
                     finally:
-                        # Publish offline status before disconnecting
-                        await self._publish_availability(client, False)
+                        self.message_queue = None
+                        for task in tasks:
+                            task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        with suppress(MqttError):
+                            await self._publish_availability(client, False)
             except MqttError:
                 logging.exception('MQTT error:')
                 await asyncio.sleep(5)
 
     async def handle_message(self, msg: ParserMessage):
-        await self.message_queue.put(msg)
+        if self.message_queue is not None:
+            self.message_queue.put_nowait(msg)
 
     async def handle_availability(self, msg: AvailabilityMessage):
-        # We'll handle this in the _handle_messages loop with the current client
-        await self.message_queue.put(msg)
+        self.device_availability[msg.device.sn] = msg.available
+        if self.message_queue is not None:
+            self.message_queue.put_nowait(msg)
 
     async def _publish_availability(self, client: Client, available: bool):
-        """Publish bridge availability status"""
-        topic = 'bluetti/bridge/status'
         payload = 'online' if available else 'offline'
-        
-        try:
-            await client.publish(topic, payload.encode(), qos=1, retain=True)
-            logging.info(f'Published bridge availability: {payload}')
-        except Exception as e:
-            logging.error(f'Failed to publish bridge availability: {e}')
+        await client.publish('bluetti/bridge/status', payload.encode(), qos=1, retain=True)
 
     async def _publish_device_availability(self, client: Client, device: BluettiDevice, available: bool):
-        """Publish device-specific availability status"""
         topic = f'bluetti/status/{device.type}-{device.sn}/availability'
         payload = 'online' if available else 'offline'
-        
-        try:
-            await client.publish(topic, payload.encode(), qos=1, retain=True)
-            current_status = self.device_availability.get(device.sn, None)
-            if current_status != available:
-                logging.info(f'Published device {device.type}-{device.sn} availability: {payload}')
-                self.device_availability[device.sn] = available
-        except Exception as e:
-            logging.error(f'Failed to publish device {device.type}-{device.sn} availability: {e}')
+        await client.publish(topic, payload.encode(), qos=1, retain=True)
 
-    async def _set_device_availability(self, client: Client, device: BluettiDevice, available: bool):
-        """Set device availability and publish if changed"""
-        current_status = self.device_availability.get(device.sn, None)
-        if current_status != available:
-            await self._publish_device_availability(client, device, available)
+    async def _publish_known_availability(self, client: Client):
+        for device in self.devices:
+            await self._publish_device_availability(
+                client, device, self.device_availability.get(device.sn, False)
+            )
 
     async def _periodic_availability_refresh(self, client: Client):
-        """Periodically republish availability to ensure it stays current"""
-        refresh_interval = 60  # Refresh every minute
         while True:
-            try:
-                await asyncio.sleep(refresh_interval)
-                # Republish bridge availability
-                await self._publish_availability(client, True)
-                # Republish all device availability
-                for sn, available in self.device_availability.items():
-                    device = next((d for d in self.devices if d.sn == sn), None)
-                    if device:
-                        await self._publish_device_availability(client, device, available)
-                logging.debug('Refreshed all availability topics')
-            except Exception as e:
-                logging.error(f'Error in periodic availability refresh: {e}')
+            await asyncio.sleep(60)
+            await self._publish_availability(client, True)
+            await self._publish_known_availability(client)
 
     async def _handle_commands(self, client: Client):
         await client.subscribe('bluetti/command/#')
@@ -711,28 +684,28 @@ class MQTTClient:
             await self._handle_command(mqtt_message)
 
     async def _handle_messages(self, client: Client):
+        queue = self.message_queue
         while True:
-            msg = await self.message_queue.get()
+            msg = await queue.get()
             if isinstance(msg, ParserMessage):
                 if msg.device not in self.devices:
                     await self._init_device(msg.device, client)
+                    self.devices.append(msg.device)
+                    if msg.device.sn in self.device_availability:
+                        await self._publish_device_availability(
+                            client, msg.device, self.device_availability[msg.device.sn]
+                        )
                 await self._handle_message(client, msg)
             elif isinstance(msg, AvailabilityMessage):
-                await self._set_device_availability(client, msg.device, msg.available)
-            self.message_queue.task_done()
+                await self._publish_device_availability(client, msg.device, msg.available)
+            queue.task_done()
 
     async def _init_device(self, device: BluettiDevice, client: Client):
-        # Register device
-        self.devices.append(device)
-        
-        # Set device as online when first discovered
-        await self._set_device_availability(client, device, True)
-
         # Skip announcing device to Home Assistant if disabled
         if self.home_assistant_mode == 'none':
             return
 
-        def payload(id: str, device: BluettiDevice, field: MqttFieldConfig) -> str:
+        def payload(id: str, component: str, field: MqttFieldConfig) -> str:
             ha_id = id if not field.id_override else field.id_override
             payload_dict = {
                 'state_topic': f'bluetti/state/{device.type}-{device.sn}/{id}',
@@ -745,7 +718,7 @@ class MQTTClient:
                     'model': device.type
                 },
                 'unique_id': f'{device.sn}_{ha_id}',
-                'object_id': f'{device.type}_{ha_id}',
+                'default_entity_id': f'{component}.{device.type.lower()}_{ha_id}',
             }
             if field.setter:
                 payload_dict['command_topic'] = f'bluetti/command/{device.type}-{device.sn}/{id}'
@@ -764,11 +737,14 @@ class MQTTClient:
             ]
             payload_dict['availability_mode'] = 'all'
             payload_dict.update(field.home_assistant_extra)
+            if device.type == 'AC60' and component == 'sensor':
+                payload_dict['expire_after'] = self.sensor_expiry
 
             return json.dumps(payload_dict, separators=(',', ':'))
 
         # Publish normal fields
-        for name, field in NORMAL_DEVICE_FIELDS.items():
+        fields = AC60_FIELDS if device.type == 'AC60' else NORMAL_DEVICE_FIELDS
+        for name, field in fields.items():
             # Skip fields not supported by the device
             if not device.has_field(name):
                 continue
@@ -779,18 +755,18 @@ class MQTTClient:
 
             # Figure out Home Assistant type
             if field.type == MqttFieldType.NUMERIC:
-                type = 'number' if field.setter else 'sensor'
+                component = 'number' if field.setter else 'sensor'
             elif field.type == MqttFieldType.BOOL:
-                type = 'switch' if field.setter else 'binary_sensor'
+                component = 'switch' if field.setter else 'binary_sensor'
             elif field.type == MqttFieldType.ENUM:
-                type = 'select' if field.setter else 'sensor'
+                component = 'select' if field.setter else 'sensor'
             elif field.type == MqttFieldType.BUTTON:
-                type = 'button'
+                component = 'button'
 
             # Publish config
             await client.publish(
-                f'homeassistant/{type}/{device.sn}_{name}/config',
-                payload=payload(name, device, field).encode(),
+                f'homeassistant/{component}/{device.sn}_{name}/config',
+                payload=payload(name, component, field).encode(),
                 retain=True
             )
 
@@ -805,16 +781,18 @@ class MQTTClient:
                 # Publish config
                 await client.publish(
                     f'homeassistant/sensor/{device.sn}_{field.id_override}/config',
-                    payload=payload(f'pack_details{pack}', device, field).encode(),
+                    payload=payload(f'pack_details{pack}', 'sensor', field).encode(),
                     retain=True
                 )
 
         # Publish DC input config
         if device.has_field('internal_dc_input_voltage'):
-            for name, field in DC_INPUT_FIELDS.items():
+            dc_fields = DC_INPUT_FIELDS if device.type == 'AC60' else LEGACY_DC_INPUT_FIELDS
+            for field in dc_fields.values():
+                name = field.id_override
                 await client.publish(
                     f'homeassistant/sensor/{device.sn}_{name}/config',
-                    payload=payload(name, device, field).encode(),
+                    payload=payload(name, 'sensor', field).encode(),
                     retain=True
                 )
 
@@ -838,22 +816,27 @@ class MQTTClient:
             logging.warn(f'Received command for unknown topic: {m[3]} - {mqtt_message.topic}')
             return
 
-        cmd: DeviceCommand = None
-        if m[3] in NORMAL_DEVICE_FIELDS:
-            field = NORMAL_DEVICE_FIELDS[m[3]]
+        field = NORMAL_DEVICE_FIELDS.get(m[3])
+        if field is None:
+            logging.warning('Received command for unhandled field: %s', m[3])
+            return
+        if device.type == 'AC60' and mqtt_message.retain:
+            logging.warning('Ignoring retained AC60 command for %s', m[3])
+            return
+        try:
             if field.type == MqttFieldType.ENUM:
                 value = mqtt_message.payload.decode('ascii')
-                cmd = device.build_setter_command(m[3], value)
             elif field.type == MqttFieldType.BOOL or field.type == MqttFieldType.BUTTON:
+                if device.type == 'AC60' and mqtt_message.payload not in (b'ON', b'OFF'):
+                    raise ValueError('expected ON or OFF')
                 value = mqtt_message.payload == b'ON'
-                cmd = device.build_setter_command(m[3], value)
             elif field.type == MqttFieldType.NUMERIC:
                 value = int(mqtt_message.payload.decode('ascii'))
-                cmd = device.build_setter_command(m[3], value)
             else:
                 raise AssertionError(f'unexpected enum type: {field.type}')
-        else:
-            logging.warn(f'Received command for unhandled topic: {m[3]} - {mqtt_message.topic}')
+            cmd = device.build_setter_command(m[3], value)
+        except (KeyError, ValueError):
+            logging.warning('Ignoring invalid command value for %s', m[3])
             return
 
         await self.bus.put(CommandMessage(device, cmd))
@@ -863,13 +846,14 @@ class MQTTClient:
         topic_prefix = f'bluetti/state/{msg.device.type}-{msg.device.sn}/'
 
         # Publish normal fields
+        fields = AC60_FIELDS if msg.device.type == 'AC60' else NORMAL_DEVICE_FIELDS
         for name, value in msg.parsed.items():
             # Skip unconfigured fields
-            if name not in NORMAL_DEVICE_FIELDS:
+            if name not in fields:
                 continue
 
             # Build payload string
-            field = NORMAL_DEVICE_FIELDS[name]
+            field = fields[name]
             if field.type == MqttFieldType.NUMERIC:
                 payload = str(value)
             elif field.type == MqttFieldType.BOOL or field.type == MqttFieldType.BUTTON:
@@ -890,21 +874,10 @@ class MQTTClient:
             )
 
         # Publish DC input data
-        if 'internal_dc_input_voltage' in msg.parsed:
-            await client.publish(
-                topic_prefix + 'dc_input_voltage1',
-                payload=str(msg.parsed['internal_dc_input_voltage']).encode()
-            )
-        if 'internal_dc_input_power' in msg.parsed:
-            await client.publish(
-                topic_prefix + 'dc_input_power1',
-                payload=str(msg.parsed['internal_dc_input_power']).encode()
-            )
-        if 'internal_dc_input_current' in msg.parsed:
-            await client.publish(
-                topic_prefix + 'dc_input_current1',
-                payload=str(msg.parsed['internal_dc_input_current']).encode()
-            )
+        dc_fields = DC_INPUT_FIELDS if msg.device.type == 'AC60' else LEGACY_DC_INPUT_FIELDS
+        for name, field in dc_fields.items():
+            if name in msg.parsed:
+                await client.publish(topic_prefix + field.id_override, payload=str(msg.parsed[name]).encode())
 
     def _build_pack_details(self, parsed: dict):
         details = {}
