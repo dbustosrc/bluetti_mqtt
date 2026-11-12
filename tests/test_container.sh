@@ -5,7 +5,7 @@ test_dir=$(mktemp -d)
 trap 'rm -rf "$test_dir"' EXIT
 
 docker run --rm --entrypoint /bin/sh "$image" -c 'bluetoothctl --version && python -m pip check'
-printf '#!/bin/sh\nprintf "Bridge lifecycle test started\\n"\nexit "$APP_EXIT_CODE"\n' > "$test_dir/run.sh"
+printf '#!/command/with-contenv sh\nprintf "Bridge lifecycle test started\\n"\nexit "$APP_EXIT_CODE"\n' > "$test_dir/run.sh"
 chmod 755 "$test_dir/run.sh"
 
 for expected in 0 7; do
